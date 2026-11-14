@@ -6,8 +6,6 @@ Requires Node.js 24.12+ with npm and OBS Studio 28+ with its WebSocket server en
 
 ## MCP setup
 
-Package prepared for first npm release. After publication:
-
 ```sh
 npx -y --prefer-online mcp-obs-studio-tools@latest mcp
 ```
