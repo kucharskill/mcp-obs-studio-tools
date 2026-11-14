@@ -1,0 +1,55 @@
+{
+  "name": "mcp-obs-studio-tools",
+  "version": "0.1.0",
+  "description": "OBS Studio CLI and transparent stdio MCP adapter",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kucharskill/mcp-obs-studio-tools.git"
+  },
+  "homepage": "https://github.com/kucharskill/mcp-obs-studio-tools#readme",
+  "bugs": { "url": "https://github.com/kucharskill/mcp-obs-studio-tools/issues" },
+  "keywords": ["obs", "obs-studio", "mcp", "cli", "recording", "obs-websocket"],
+  "publishConfig": { "access": "public" },
+  "type": "module",
+  "license": "GPL-2.0-only",
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "bin": {
+    "obs-mcp": "src/cli.js"
+  },
+  "files": [
+    "src/",
+    "data/",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "start": "node src/cli.js mcp",
+    "check": "tsc -p jsconfig.json && node --test test/*.test.js",
+    "test": "node --test test/*.test.js",
+    "catalog:update": "node scripts/update-catalog.js",
+    "package:verify": "node scripts/verify-package.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "cross-spawn": "^7.0.6",
+    "dotenv": "^18.0.10",
+    "obs-websocket-js": "^5.0.8",
+    "proper-lockfile": "^4.1.2",
+    "systeminformation": "^5.33.22",
+    "write-file-atomic": "^8.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^26.6.6",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/write-file-atomic": "^4.0.3",
+    "tar": "^7.5.23",
+    "typescript": "^7.0.2",
+    "ws": "^8.22.2"
+  }
+}
