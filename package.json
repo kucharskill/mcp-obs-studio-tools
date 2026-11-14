@@ -1,15 +1,26 @@
 {
   "name": "mcp-obs-studio-tools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OBS Studio CLI and transparent stdio MCP adapter",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kucharskill/mcp-obs-studio-tools.git"
   },
   "homepage": "https://github.com/kucharskill/mcp-obs-studio-tools#readme",
-  "bugs": { "url": "https://github.com/kucharskill/mcp-obs-studio-tools/issues" },
-  "keywords": ["obs", "obs-studio", "mcp", "cli", "recording", "obs-websocket"],
-  "publishConfig": { "access": "public" },
+  "bugs": {
+    "url": "https://github.com/kucharskill/mcp-obs-studio-tools/issues"
+  },
+  "keywords": [
+    "obs",
+    "obs-studio",
+    "mcp",
+    "cli",
+    "recording",
+    "obs-websocket"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "license": "GPL-2.0-only",
   "engines": {

@@ -2,6 +2,8 @@
 
 Control OBS Studio through an MCP agent: inspect status, launch OBS, record, capture the active scene, switch scenes and inspect audio routing. Discover additional operations through a searchable catalog generated from the official OBS WebSocket protocol.
 
+Available on [npm](https://www.npmjs.com/package/mcp-obs-studio-tools), with source and releases on [GitHub](https://github.com/kucharskill/mcp-obs-studio-tools).
+
 Requires Node.js 24.12+ with npm and OBS Studio 28+ with its WebSocket server enabled under **Tools > WebSocket Server Settings**.
 
 ## MCP setup
