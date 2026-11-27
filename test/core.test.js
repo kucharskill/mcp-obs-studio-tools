@@ -1,7 +1,7 @@
+import { tempDir } from './temp.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, mkdir, writeFile, readFile, utimes, chmod } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, mkdir, writeFile, readFile, utimes, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runnerMode, createRunner } from '../src/runner.js';
 import { findCommands, validateCommand } from '../src/catalog.js';
@@ -21,7 +21,7 @@ test('connection refusal includes actionable server activation guidance', () => 
 });
 
 test('env-file aliases resolve paths and persist discovered executables without losing configuration', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'obs-env-test-'));
+  const root = await tempDir('obs-env-test-');
   try {
     const path = join(root, 'settings.env');
     const env = {};
@@ -45,7 +45,7 @@ test('env-file aliases resolve paths and persist discovered executables without 
 });
 
 test('running OBS path is validated and prevents gathering installation or PATH candidates', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'obs-process-env-test-'));
+  const root = await tempDir('obs-process-env-test-');
   try {
   const processes = await findObsProcesses(async () => ({ list: [
     { pid: 1, name: 'obs64.exe', path: process.execPath },
@@ -64,7 +64,7 @@ test('running OBS path is validated and prevents gathering installation or PATH 
 });
 
 test('unusable process paths fall back to validated PATH candidates, reporting process scan errors', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'obs-discovery-test-'));
+  const root = await tempDir('obs-discovery-test-');
   try {
     const binary = join(root, process.platform === 'win32' ? 'obs64.exe' : 'obs');
     await writeFile(binary, 'fixture'); await chmod(binary, 0o755);
@@ -126,7 +126,7 @@ test('catalog searches and validates full sequences before connecting', () => {
 });
 
 test('recording history expires at 12h and discovers local files with honest timestamps', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'obs-history-test-'));
+  const root = await tempDir('obs-history-test-');
   try {
     const url = 'ws://127.0.0.1:4455/';
     await rememberRecording(url, root, 'recorded.mkv');

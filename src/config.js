@@ -57,8 +57,9 @@ export async function saveEnvValues(values, env = process.env) {
 }
 
 /** Load configuration per invocation so a running adapter sees file changes. */
-export function loadEnvironment() {
-  const env = { ...process.env };
+/** @param {NodeJS.ProcessEnv} [source] */
+export function loadEnvironment(source = process.env) {
+  const env = { ...source };
   const loaded = dotenv.config({ path: envFilePath(env), processEnv: env, quiet: true });
   if (loaded.error && /** @type {NodeJS.ErrnoException} */ (loaded.error).code !== 'ENOENT') throw loaded.error;
   return env;
@@ -72,9 +73,11 @@ export function config() {
   return { url: url.href, password: env.OBS_PASSWORD || undefined, executable: env.OBS_EXECUTABLE, stateDir: env.OBS_STATE_DIR, timeout };
 }
 
-/** Worker-owned idle deadline, independent of operation duration. */
-export function workerIdleMs() {
-  return z.coerce.number().int().min(20).max(86400000).parse(loadEnvironment().OBS_WORKER_IDLE_MS ?? 1800000);
+/** Worker-owned retention windows, independent of client response deadlines. */
+export function workerRetention() {
+  const env = loadEnvironment();
+  const duration = z.coerce.number().int().min(20).max(86400000);
+  return { callMs: duration.parse(env.OBS_WORKER_IDLE_MS ?? 1800000), discoveryMs: duration.parse(env.OBS_WORKER_DISCOVERY_IDLE_MS ?? 60000) };
 }
 
 /** Apply and persist only supplied connection settings. Configuration merging is shared by callers.

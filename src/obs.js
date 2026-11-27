@@ -31,11 +31,29 @@ export function connectionFailure(error, hasPassword = Boolean(config().password
 /** @template T @param {(obs: OBSWebSocket, settings: ReturnType<typeof config>) => Promise<T>} action @param {AbortSignal} [signal] @param {ReturnType<typeof config>} [settings] */
 export async function withObs(action, signal, settings = config()) {
   const obs = new OBSWebSocket();
+  // The library leaves pending call() promises unresolved on socket closure.
+  // Settle our request wrappers on disconnect while still awaiting actual local
+  // application cleanup below, rather than releasing worker activity on timeout.
+  const disconnected = new Promise((_, reject) => {
+    obs.once('ConnectionClosed', () => reject(new Error('OBS WebSocket disconnected; the request may already have taken effect. Check status before retrying.')));
+  });
+  void disconnected.catch(() => {});
+  const requests = new Proxy(obs, { get(target, property) {
+    const value = Reflect.get(target, property);
+    if (property === 'call' || property === 'callBatch') {
+      /** @param {...unknown} args */
+      const call = (...args) => Promise.race([Reflect.apply(value, target, args), disconnected]);
+      return call;
+    }
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
   const abort = () => { void obs.disconnect().catch(() => {}); };
   const timeout = AbortSignal.timeout(settings.timeout);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   /** @type {(() => void)|undefined} */
   let removeReject;
+  /** @type {Promise<T>|undefined} */
+  let operation;
   const cancelled = new Promise((_, reject) => {
     const handler = () => { abort(); reject(new Error('OBS operation cancelled or timed out; it may already have taken effect. Check obs_status before retrying.')); };
     combined.addEventListener('abort', handler, { once: true });
@@ -43,14 +61,18 @@ export async function withObs(action, signal, settings = config()) {
   });
   try {
     combined.throwIfAborted();
-    return await Promise.race([(async () => {
+    operation = (async () => {
       await obs.connect(settings.url, settings.password, { rpcVersion: 1, eventSubscriptions: 0 });
       combined.throwIfAborted();
-      return action(obs, settings);
-    })(), cancelled]);
+      return action(requests, settings);
+    })();
+    return await Promise.race([operation, cancelled]);
   } finally {
     removeReject?.();
     await obs.disconnect().catch(() => {});
+    // A client timeout/cancellation is not completion. Keep the handler active
+    // until its application work has settled after the socket is disconnected.
+    await operation?.catch(() => {});
   }
 }
 

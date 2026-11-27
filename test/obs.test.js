@@ -1,9 +1,9 @@
+import { tempDir } from './temp.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { WebSocketServer } from 'ws';
 import { executeTool } from '../src/tools.js';
 import { Client } from '@modelcontextprotocol/client';
@@ -14,7 +14,7 @@ import dotenv from 'dotenv';
 test('real OBS client: handshake, recording, history, screenshot, errors, disconnects and stdio adapter', async () => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(server, 'listening');
-  const root = await mkdtemp(join(tmpdir(), 'obs-api-test-'));
+  const root = await tempDir('obs-api-test-');
   const oldEnv = { ...process.env };
   process.env.OBS_URL = `ws://127.0.0.1:${server.address().port}`;
   process.env.OBS_STATE_DIR = root;
