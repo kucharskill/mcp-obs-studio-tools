@@ -85,7 +85,7 @@ Sequences validate all commands before execution and stop on failure by default.
 | `OBS_WORKER_DISCOVERY_IDLE_MS` | `60000`, retention after backend discovery |
 | `OBS_DISCOVERY_CACHE_MS` | `600000`, shared discovery cache lifetime; `0` disables it |
 | `OBS_DISCOVERY_CACHE_DIR` | System temporary directory under `obs-mcp/discovery` |
-| `OBS_DISCOVERY_CACHE_EXCLUDE_ENV` | Comma-separated additional environment names excluded from the cache key; `CODEX_TOOL_CALL_ID` is always excluded |
+| `OBS_DISCOVERY_CACHE_EXCLUDE_ENV` | Comma-separated additional environment names excluded from the cache key. `CODEX_TOOL_CALL_ID`, `PATH`, and names starting with `INIT_` or `NPM_` are always excluded, case-insensitively |
 | `OBS_MCP_REQUEST_TIMEOUT_MS` | `180000`, MCP response deadline |
 | `OBS_STATE_DIR` | Recording history; defaults to the system temporary directory under `obs-mcp` |
 | `OBS_MCP_RUNNER` | `auto`, `local` or `latest` |

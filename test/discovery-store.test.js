@@ -39,7 +39,20 @@ test('invocation keys use full environment, canonical Windows names and explicit
   assert.equal(key, discoveryKey({ ...base, env: { codex_tool_call_id: 'two', password: 'synthetic', PATH: 'bin' } }));
   for (const changed of [{ command: 'npx' }, { args: ['cli.js --worker'] }, { cwd: '/two' }, { env: { ...base.env, PASSWORD: 'other' } }, { env: { ...base.env, EXTRA: 'x' } }]) assert.notEqual(key, discoveryKey({ ...base, ...changed }));
   assert.equal(discoveryKey({ ...base, exclude: ['password'] }), discoveryKey({ ...base, exclude: ['PASSWORD'], env: { ...base.env, PASSWORD: 'changed' } }));
-  assert.notEqual(discoveryKey({ ...base, platform: 'linux' }), discoveryKey({ ...base, platform: 'linux', env: { PATH: 'bin', PASSWORD: 'synthetic' } }));
+  assert.notEqual(discoveryKey({ ...base, platform: 'linux' }), discoveryKey({ ...base, platform: 'linux', env: { PATH: 'bin', password: 'synthetic' } }));
+});
+
+test('PATH and INIT_/NPM_ prefixes are excluded case-insensitively without modifying env', () => {
+  for (const platform of ['linux', 'win32']) {
+    const env = { OBS_URL: 'ws://fixture:4455', OBS_PASSWORD: 'synthetic', PATH: 'first-bin', INIT_CWD: '/first', npm_config_local_prefix: '/first', npm_package_json: '/first/package.json' };
+    const original = structuredClone(env);
+    const base = { command: 'node', args: ['cli.js', '--worker'], cwd: '/work', env, platform };
+    const key = discoveryKey(base);
+    assert.equal(key, discoveryKey({ ...base, env: { OBS_URL: env.OBS_URL, OBS_PASSWORD: env.OBS_PASSWORD, pAtH: 'other-bin', iNiT_cWd: '/other', Init_CUSTOM: 'one', nPm_CoNfIg_LoCaL_PrEfIx: '/other', NPM_PACKAGE_JSON: '/other/package.json', npm_OTHER: 'two', codex_tool_call_id: 'changed' } }));
+    assert.deepEqual(env, original);
+    for (const name of ['OBS_URL', 'OBS_PASSWORD', 'INITIAL_VALUE', 'NPMISH', 'PATH_EXTRA']) assert.notEqual(key, discoveryKey({ ...base, env: { ...env, [name]: 'different' } }));
+    assert.equal(discoveryKey({ ...base, exclude: ['custom'] }), discoveryKey({ ...base, exclude: ['CUSTOM'], env: { ...env, CuStOm: 'ignored' } }));
+  }
 });
 
 test('shared records validate format/context/TTL, remain fixed on hits, serialize writes and invalidate other caches', async () => {
@@ -146,7 +159,8 @@ test('two wrapper processes share discovery; legacy ping and warm init/list neve
     assert.equal(records[0].env.OBS_ENV_FILE, env.OBS_ENV_FILE, 'Capture precedes application env-file argument changes');
     assert.equal(records[0].env.CODEX_TOOL_CALL_ID, 'first');
   } finally { await first.close(); }
-  const second = legacy({ ...env, CODEX_TOOL_CALL_ID: 'second' }, args);
+  const secondEnv = { ...env, CODEX_TOOL_CALL_ID: 'second', INIT_CWD: '/second', npm_config_local_prefix: '/second', npm_package_json: '/second/package.json', PATH: (env.PATH ?? env.Path ?? '') + (process.platform === 'win32' ? ';' : ':') + directory };
+  const second = legacy(secondEnv, args);
   try {
     await second.initialize();
     assert.equal((await second.request('tools/list')).tools.length, 11);
@@ -164,7 +178,10 @@ test('two wrapper processes share discovery; legacy ping and warm init/list neve
     await second.request('tools/list');
     // Expiry never removes the shared discovery file.
     assert.ok((await readdir(directory)).some(name => name.endsWith('.json')));
-    assert.equal((await snapshots()).length, 2, 'Backend restart and operations do not append records');
+    const records = await snapshots();
+    assert.equal(records.length, 2, 'Backend restart and operations do not append records');
+    assert.equal(records[1].env.npm_package_json, secondEnv.npm_package_json);
+    assert.equal(records[1].env.PATH, secondEnv.PATH);
   } finally { await second.close(); }
   const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('src/cli.js'), 'mcp', ...args], env, stderr: 'pipe' });
   let modernLogs = '';

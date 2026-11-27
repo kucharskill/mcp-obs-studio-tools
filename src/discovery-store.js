@@ -37,9 +37,12 @@ const recordSchema = z.object({
  */
 export function discoveryKey({ command, args, cwd, env, exclude = [], platform = process.platform }) {
   const normalize = (/** @type {string} */ name) => platform === 'win32' ? name.toUpperCase() : name;
-  const excluded = new Set(['CODEX_TOOL_CALL_ID', ...exclude].map(normalize));
+  const excluded = new Set(['CODEX_TOOL_CALL_ID', 'PATH', ...exclude].map(name => name.toUpperCase()));
   const canonical = new Map();
-  for (const [name, value] of Object.entries(env)) if (value !== undefined && !excluded.has(normalize(name))) canonical.set(normalize(name), value);
+  for (const [name, value] of Object.entries(env)) {
+    const upper = name.toUpperCase();
+    if (value !== undefined && !excluded.has(upper) && !upper.startsWith('INIT_') && !upper.startsWith('NPM_')) canonical.set(normalize(name), value);
+  }
   const entries = [...canonical.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return createHash('sha256').update(JSON.stringify([command, args, cwd, entries])).digest('hex');
 }
