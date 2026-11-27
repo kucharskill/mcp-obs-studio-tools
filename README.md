@@ -83,7 +83,9 @@ Sequences validate all commands before execution and stop on failure by default.
 | `OBS_TIMEOUT_MS` | `15000`, per OBS operation |
 | `OBS_WORKER_IDLE_MS` | `1800000`, retention after a completed tool call |
 | `OBS_WORKER_DISCOVERY_IDLE_MS` | `60000`, retention after backend discovery |
-| `OBS_DISCOVERY_CACHE_MS` | `300000`, wrapper-local discovery cache lifetime; `0` disables it |
+| `OBS_DISCOVERY_CACHE_MS` | `600000`, shared discovery cache lifetime; `0` disables it |
+| `OBS_DISCOVERY_CACHE_DIR` | System temporary directory under `obs-mcp/discovery` |
+| `OBS_DISCOVERY_CACHE_EXCLUDE_ENV` | Comma-separated additional environment names excluded from the cache key; `CODEX_TOOL_CALL_ID` is always excluded |
 | `OBS_MCP_REQUEST_TIMEOUT_MS` | `180000`, MCP response deadline |
 | `OBS_STATE_DIR` | Recording history; defaults to the system temporary directory under `obs-mcp` |
 | `OBS_MCP_RUNNER` | `auto`, `local` or `latest` |
@@ -94,7 +96,9 @@ Outputs include JSON status/results, PNG screenshots and recording file paths. R
 
 ## Worker lifecycle
 
-The wrapper serves fresh discovery from a context-aware in-memory cache, including after a worker has exited. Cache hits leave the worker lifecycle untouched. Cache age, changes to the selected env file or local source files, and tool-list notifications trigger a metadata refresh. The cache belongs to one wrapper/context; a cold wrapper fetches discovery once. Ordinary tool results are executed live.
+The wrapper serves discovery from a shared file cache in the user's temporary directory, including initialization in another wrapper and discovery after worker expiry. Cache hits preserve the original expiry and leave the worker lifecycle untouched. The cache key hashes the target command, arguments, working directory and sorted environment, with case-insensitive environment names on Windows. Exclusions affect only the key; the full environment reaches the worker. Files contain tool metadata and hashed context fingerprints, with atomic writes and a default lifetime of 10 minutes. Cache age, changes to the selected env file or local source files, tool-list notifications and detected backend identity changes trigger a metadata refresh. Ordinary tool results are executed live.
+
+Legacy MCP ping receives a local response from the wrapper's SDK handler. Modern MCP uses its negotiated protocol without adding the removed ping RPC. Initialization and discovery negotiate capabilities through the SDK; cached records contain tool definitions and server identity, independent of client sessions.
 
 The worker owns one active-request counter, one expiry deadline and one idle timer. Backend discovery retains it for 1 minute; completed tool calls retain it for 30 minutes. Each completion extends the deadline using the greater of its current value and the new retention window, so discovery preserves any longer tool-call deadline. Active requests suspend expiry until their application work settles, including cancellation cleanup. The worker exits itself at the deadline, and the next backend operation starts another. OBS continues running independently.
 

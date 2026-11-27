@@ -1,6 +1,6 @@
 {
   "name": "mcp-obs-studio-tools",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OBS Studio CLI and transparent stdio MCP adapter",
   "repository": {
     "type": "git",

@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { createDiscoveryCache } from './discovery-cache.js';
+import { createDiscoveryStore, discoveryKey } from './discovery-store.js';
 import { loadEnvironment } from './config.js';
 import { diagnostic } from './diagnostics.js';
 
@@ -28,7 +29,7 @@ export function createRunner(packageName, env = process.env) {
   // Resolve this once at adapter startup, not separately in child processes.
   const configured = loadEnvironment(env);
   const mode = runnerMode(configured);
-  const cacheMs = z.coerce.number().int().min(0).max(86400000).parse(configured.OBS_DISCOVERY_CACHE_MS ?? 300000);
+  const cacheMs = z.coerce.number().int().min(0).max(86400000).parse(configured.OBS_DISCOVERY_CACHE_MS ?? 600000);
   const requestMs = z.coerce.number().int().min(20).max(86400000).parse(configured.OBS_MCP_REQUEST_TIMEOUT_MS ?? 180000);
   const command = mode === 'latest' ? 'npx' : process.execPath;
   const args = mode === 'latest' ? ['-y', '--prefer-online', `${packageName}@latest`, '--worker'] : [fileURLToPath(new URL('./cli.js', import.meta.url)), '--worker'];
@@ -59,11 +60,11 @@ export function createRunner(packageName, env = process.env) {
     await current.ready;
     if (closed || connection !== current) throw new Error('Worker disconnected before the operation was sent. Retry the request.');
     const previous = cache.peek();
-    if (previous && JSON.stringify(previous.serverInfo) !== JSON.stringify(current.client.getServerVersion())) cache.invalidate();
+    if (previous && JSON.stringify(previous.serverInfo) !== JSON.stringify(current.client.getServerVersion())) await cache.invalidate();
     return current.client;
   }
   const context = () => {
-    const hash = createHash('sha256').update(JSON.stringify([packageName, mode, process.cwd(), childEnv.OBS_ENV_FILE]));
+    const hash = createHash('sha256');
     // File contents are hashed locally; secrets and fingerprints are never logged.
     const paths = [childEnv.OBS_ENV_FILE];
     if (mode === 'local') {
@@ -79,7 +80,9 @@ export function createRunner(packageName, env = process.env) {
     }
     return hash.digest('hex');
   };
-  const cache = createDiscoveryCache({ ttlMs: cacheMs, context, load: async () => {
+  const key = discoveryKey({ command, args, cwd: process.cwd(), env: childEnv, exclude: configured.OBS_DISCOVERY_CACHE_EXCLUDE_ENV?.split(',').map(name => name.trim()).filter(Boolean) });
+  const store = createDiscoveryStore({ key, ttlMs: cacheMs, directory: configured.OBS_DISCOVERY_CACHE_DIR });
+  const cache = createDiscoveryCache({ ttlMs: cacheMs, context, store, load: async () => {
     const client = await getClient();
     const result = await client.listTools({}, { timeout: requestMs });
     return { protocol: 1, serverInfo: client.getServerVersion(), tools: result.tools };

@@ -1,0 +1,68 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import lockfile from 'proper-lockfile';
+import writeFileAtomic from 'write-file-atomic';
+import { z } from 'zod';
+
+const manifestSchema = z.object({
+  protocol: z.literal(1),
+  serverInfo: z.object({ name: z.string(), version: z.string() }).passthrough(),
+  tools: z.array(z.object({ name: z.string(), inputSchema: z.object({ type: z.literal('object') }).passthrough() }).passthrough()),
+});
+const recordSchema = z.object({
+  format: z.literal(1), key: z.string(), context: z.string(),
+  createdAt: z.number().finite(), expiresAt: z.number().finite(), value: manifestSchema,
+});
+
+/** Hash only the target invocation. Exclusions never change the environment sent to it.
+ * @param {{command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, exclude?: string[], platform?: string}} invocation
+ */
+export function discoveryKey({ command, args, cwd, env, exclude = [], platform = process.platform }) {
+  const normalize = (/** @type {string} */ name) => platform === 'win32' ? name.toUpperCase() : name;
+  const excluded = new Set(['CODEX_TOOL_CALL_ID', ...exclude].map(normalize));
+  const canonical = new Map();
+  for (const [name, value] of Object.entries(env)) if (value !== undefined && !excluded.has(normalize(name))) canonical.set(normalize(name), value);
+  const entries = [...canonical.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return createHash('sha256').update(JSON.stringify([command, args, cwd, entries])).digest('hex');
+}
+
+/** Shared metadata only; keys and freshness fingerprints contain no readable environment.
+ * Atomic replacement plus a per-key write lock protects concurrent writers/removers.
+ * @param {{key: string, directory?: string, ttlMs: number, now?: () => number}} options
+ */
+export function createDiscoveryStore({ key, directory = join(tmpdir(), 'obs-mcp', 'discovery'), ttlMs, now = Date.now }) {
+  if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid discovery cache key');
+  const path = join(directory, `${key}.json`);
+  /** @param {() => Promise<void>} action */
+  async function mutate(action) {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const release = await lockfile.lock(path, { realpath: false, retries: { retries: 20, minTimeout: 10, maxTimeout: 100 } });
+    try { await action(); } finally { await release(); }
+  }
+  return {
+    path,
+    /** @param {string} context */
+    async read(context) {
+      try {
+        const bytes = await readFile(path, 'utf8');
+        if (bytes.length > 8 * 1024 * 1024) return undefined;
+        const parsed = recordSchema.safeParse(JSON.parse(bytes));
+        if (!parsed.success) return undefined;
+        const record = parsed.data;
+        if (record.key !== key || record.context !== context || record.createdAt > now() || record.expiresAt <= now() || record.expiresAt > record.createdAt + ttlMs) return undefined;
+        return { ...record, until: record.expiresAt };
+      } catch { return undefined; }
+    },
+    /** @param {{key: string, until: number, value: any}} entry */
+    async write(entry) {
+      const value = manifestSchema.parse(entry.value);
+      await mutate(() => {
+        const createdAt = now();
+        return writeFileAtomic(path, JSON.stringify({ format: 1, key, context: entry.key, createdAt, expiresAt: createdAt + ttlMs, value }), { mode: 0o600 });
+      });
+    },
+    async remove() { await mutate(() => rm(path, { force: true })); },
+  };
+}
