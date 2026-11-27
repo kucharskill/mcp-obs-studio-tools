@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { createDiscoveryCache } from './discovery-cache.js';
+import { createDiscoveryCache, reusableDiscovery } from './discovery-cache.js';
 import { createDiscoveryStore, discoveryKey } from './discovery-store.js';
 import { loadEnvironment } from './config.js';
 import { diagnostic } from './diagnostics.js';
@@ -82,10 +82,10 @@ export function createRunner(packageName, env = process.env) {
   };
   const key = discoveryKey({ command, args, cwd: process.cwd(), env: childEnv, exclude: configured.OBS_DISCOVERY_CACHE_EXCLUDE_ENV?.split(',').map(name => name.trim()).filter(Boolean) });
   const store = createDiscoveryStore({ key, ttlMs: cacheMs, directory: configured.OBS_DISCOVERY_CACHE_DIR });
-  const cache = createDiscoveryCache({ ttlMs: cacheMs, context, store, load: async () => {
+  const cache = createDiscoveryCache({ ttlMs: cacheMs, context, store, reusable: value => reusableDiscovery(value.result), load: async () => {
     const client = await getClient();
     const result = await client.listTools({}, { timeout: requestMs });
-    return { protocol: 1, serverInfo: client.getServerVersion(), tools: result.tools };
+    return { protocol: 1, serverInfo: client.getServerVersion(), tools: result.tools, result };
   } });
   /** @param {string[]} options @param {unknown} [input] @param {AbortSignal} [signal] */
   const run = async (options, input, signal) => {

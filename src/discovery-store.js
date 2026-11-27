@@ -22,13 +22,15 @@ export function writeEnvironmentSnapshot(directory, env, startedAt) {
   } catch { return undefined; }
 }
 
+const toolsSchema = z.array(z.object({ name: z.string(), inputSchema: z.object({ type: z.literal('object') }).passthrough() }).passthrough());
 const manifestSchema = z.object({
   protocol: z.literal(1),
   serverInfo: z.object({ name: z.string(), version: z.string() }).passthrough(),
-  tools: z.array(z.object({ name: z.string(), inputSchema: z.object({ type: z.literal('object') }).passthrough() }).passthrough()),
-});
+  tools: toolsSchema,
+  result: z.object({ tools: toolsSchema }).passthrough().optional(),
+}).passthrough();
 const recordSchema = z.object({
-  format: z.literal(1), key: z.string(), context: z.string(),
+  format: z.literal(2), key: z.string(), context: z.string(),
   createdAt: z.number().finite(), expiresAt: z.number().finite(), value: manifestSchema,
 });
 
@@ -67,19 +69,19 @@ export function createDiscoveryStore({ key, directory = defaultDirectory, ttlMs,
       try {
         const bytes = await readFile(path, 'utf8');
         if (bytes.length > 8 * 1024 * 1024) return undefined;
-        const parsed = recordSchema.safeParse(JSON.parse(bytes));
+        const record = JSON.parse(bytes);
+        const parsed = recordSchema.safeParse(record);
         if (!parsed.success) return undefined;
-        const record = parsed.data;
         if (record.key !== key || record.context !== context || record.createdAt > now() || record.expiresAt <= now() || record.expiresAt > record.createdAt + ttlMs) return undefined;
         return { ...record, until: record.expiresAt };
       } catch { return undefined; }
     },
     /** @param {{key: string, until: number, value: any}} entry */
     async write(entry) {
-      const value = manifestSchema.parse(entry.value);
+      manifestSchema.parse(entry.value);
       await mutate(() => {
         const createdAt = now();
-        return writeFileAtomic(path, JSON.stringify({ format: 1, key, context: entry.key, createdAt, expiresAt: createdAt + ttlMs, value }), { mode: 0o600 });
+        return writeFileAtomic(path, JSON.stringify({ format: 2, key, context: entry.key, createdAt, expiresAt: createdAt + ttlMs, value: entry.value }), { mode: 0o600 });
       });
     },
     async remove() { await mutate(() => rm(path, { force: true })); },

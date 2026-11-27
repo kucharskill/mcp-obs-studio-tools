@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/server';
 
-/** @typedef {{protocol: number, serverInfo: {name: string, version: string}, tools: import('@modelcontextprotocol/server').Tool[]}} Manifest */
+/** @typedef {{protocol: number, serverInfo: {name: string, version: string}, tools: import('@modelcontextprotocol/server').Tool[], result?: any}} Manifest */
 /** @param {(args: string[], input?: unknown, signal?: AbortSignal) => Promise<any>} run */
 export async function createAdapter(run) {
   /** @type {Manifest} */
@@ -15,7 +15,7 @@ export async function createAdapter(run) {
     const serialized = JSON.stringify(current.tools);
     if (serialized !== previous) await server.sendToolListChanged();
     previous = serialized;
-    return { tools: current.tools };
+    return current.result ?? { tools: current.tools };
   });
   server.setRequestHandler('tools/call', async (request, context) => {
     try {
