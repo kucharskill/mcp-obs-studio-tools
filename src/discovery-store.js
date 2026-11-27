@@ -1,10 +1,26 @@
 import { createHash } from 'node:crypto';
+import { mkdirSync, appendFileSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import lockfile from 'proper-lockfile';
 import writeFileAtomic from 'write-file-atomic';
 import { z } from 'zod';
+
+const defaultDirectory = join(tmpdir(), 'obs-mcp', 'discovery');
+
+/** Best-effort startup record of the original wrapper environment, kept local only.
+ * @param {string|undefined} directory @param {NodeJS.ProcessEnv} env @param {string} startedAt
+ */
+export function writeEnvironmentSnapshot(directory, env, startedAt) {
+  try {
+    const target = directory ?? defaultDirectory;
+    mkdirSync(target, { recursive: true, mode: 0o700 });
+    const path = join(target, 'env-startup.jsonl');
+    appendFileSync(path, JSON.stringify({ pid: process.pid, startedAt, env }) + '\n', { mode: 0o600 });
+    return path;
+  } catch { return undefined; }
+}
 
 const manifestSchema = z.object({
   protocol: z.literal(1),
@@ -32,7 +48,7 @@ export function discoveryKey({ command, args, cwd, env, exclude = [], platform =
  * Atomic replacement plus a per-key write lock protects concurrent writers/removers.
  * @param {{key: string, directory?: string, ttlMs: number, now?: () => number}} options
  */
-export function createDiscoveryStore({ key, directory = join(tmpdir(), 'obs-mcp', 'discovery'), ttlMs, now = Date.now }) {
+export function createDiscoveryStore({ key, directory = defaultDirectory, ttlMs, now = Date.now }) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid discovery cache key');
   const path = join(directory, `${key}.json`);
   /** @param {() => Promise<void>} action */

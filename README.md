@@ -100,6 +100,8 @@ The wrapper serves discovery from a shared file cache in the user's temporary di
 
 Legacy MCP ping receives a local response from the wrapper's SDK handler. Modern MCP uses its negotiated protocol without adding the removed ping RPC. Initialization and discovery negotiate capabilities through the SDK; cached records contain tool definitions and server identity, independent of client sessions.
 
+At startup, each MCP wrapper appends one `{pid, startedAt, env}` record containing its original process environment to `env-startup.jsonl` beside the cache. This local diagnostic file can contain credentials and uses owner-only permissions where supported. Snapshot failures leave MCP operation unaffected.
+
 The worker owns one active-request counter, one expiry deadline and one idle timer. Backend discovery retains it for 1 minute; completed tool calls retain it for 30 minutes. Each completion extends the deadline using the greater of its current value and the new retention window, so discovery preserves any longer tool-call deadline. Active requests suspend expiry until their application work settles, including cancellation cleanup. The worker exits itself at the deadline, and the next backend operation starts another. OBS continues running independently.
 
 MCP response deadlines limit client waiting separately from worker activity. Lifecycle diagnostics on stderr report methods, cache hits/misses, activity, expiry and close reasons. Set `OBS_MCP_DIAGNOSTICS=0` in the launching environment to disable diagnostics.

@@ -1,18 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { readFile, writeFile, rm, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
-import { discoveryKey, createDiscoveryStore } from '../src/discovery-store.js';
+import { discoveryKey, createDiscoveryStore, writeEnvironmentSnapshot } from '../src/discovery-store.js';
 import { createDiscoveryCache } from '../src/discovery-cache.js';
 import { tempDir } from './temp.js';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const manifest = version => ({ protocol: 1, serverInfo: { name: 'fixture', version }, tools: [{ name: `tool_${version}`, description: 'Fixture help', inputSchema: { type: 'object', properties: { value: { type: 'string' } } } }] });
+
+test('startup snapshots append original environments to one private JSONL file, best effort', async () => {
+  const directory = await tempDir('env-snapshot-');
+  const env = { PATH: 'fixture-bin', SYNTHETIC_SECRET: 'fixture-secret-value', CODEX_TOOL_CALL_ID: 'fixture-call' };
+  try {
+    const startedAt = new Date().toISOString();
+    const first = writeEnvironmentSnapshot(directory, env, startedAt);
+    const second = writeEnvironmentSnapshot(directory, { ...env, CODEX_TOOL_CALL_ID: 'next-call' }, startedAt);
+    assert.equal(first, second); assert.equal(first, join(directory, 'env-startup.jsonl'));
+    const records = (await readFile(first, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(records[0], { pid: process.pid, startedAt, env });
+    assert.equal(records[1].env.CODEX_TOOL_CALL_ID, 'next-call');
+    assert.equal(records.length, 2);
+    if (process.platform !== 'win32') assert.equal((await stat(first)).mode & 0o777, 0o600);
+    const blocked = join(directory, 'blocked'); await writeFile(blocked, 'fixture');
+    assert.equal(writeEnvironmentSnapshot(blocked, env, startedAt), undefined);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test('invocation keys use full environment, canonical Windows names and explicit exclusions', () => {
   const base = { command: 'node', args: ['cli.js', '--worker'], cwd: '/one', env: { Path: 'bin', PASSWORD: 'synthetic', CODEX_TOOL_CALL_ID: 'one' }, platform: 'win32' };
@@ -80,8 +98,8 @@ test('invalidation during a refresh or write cannot restore stale metadata; fail
 });
 
 /** Raw legacy client keeps ping testing independent of SDK client era selection. */
-function legacy(env) {
-  const child = spawn(process.execPath, [resolve('src/cli.js'), 'mcp'], { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+function legacy(env, args = []) {
+  const child = spawn(process.execPath, [resolve('src/cli.js'), 'mcp', ...args], { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   let id = 0, stderr = '';
   const pending = new Map();
   child.stderr.on('data', bytes => { stderr += bytes; });
@@ -101,13 +119,19 @@ function legacy(env) {
     const result = await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     return result;
-  }, async close() { const exited = once(child, 'exit'); child.stdin.end(); await exited; lines.close(); } };
+  }, async close() {
+    if (child.exitCode === null) { const exited = once(child, 'exit'); child.stdin.end(); await exited; }
+    lines.close();
+  } };
 }
 
 test('two wrapper processes share discovery; legacy ping and warm init/list never start or retain a worker', async () => {
   const directory = await tempDir('replica-cache-');
   const env = { ...process.env, OBS_DISCOVERY_CACHE_DIR: directory, OBS_ENV_FILE: join(directory, 'absent.env'), OBS_MCP_RUNNER: 'local', OBS_MCP_DIAGNOSTICS: '1', OBS_WORKER_DISCOVERY_IDLE_MS: '150', OBS_WORKER_IDLE_MS: '600', CODEX_TOOL_CALL_ID: 'first' };
-  const first = legacy(env);
+  const args = ['--env-file', join(directory, 'selected.env')];
+  await writeFile(args[1], '# fixture\n');
+  const snapshots = async () => (await readFile(join(directory, 'env-startup.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const first = legacy(env, args);
   try {
     const init = await first.initialize();
     assert.equal(init.protocolVersion, '2025-11-25');
@@ -117,14 +141,18 @@ test('two wrapper processes share discovery; legacy ping and warm init/list neve
     for (let i = 0; i < 8; i++) { assert.deepEqual(await first.request('ping'), {}); await first.request('tools/list'); await delay(80); }
     assert.match(first.logs(), /idle-expired/);
     assert.equal((first.logs().match(/worker-start/g) ?? []).length, 1);
+    const records = await snapshots();
+    assert.equal(records.length, 1, 'Discovery, ping and worker starts do not append startup records');
+    assert.equal(records[0].env.OBS_ENV_FILE, env.OBS_ENV_FILE, 'Capture precedes application env-file argument changes');
+    assert.equal(records[0].env.CODEX_TOOL_CALL_ID, 'first');
   } finally { await first.close(); }
-  const second = legacy({ ...env, CODEX_TOOL_CALL_ID: 'second' });
+  const second = legacy({ ...env, CODEX_TOOL_CALL_ID: 'second' }, args);
   try {
     await second.initialize();
     assert.equal((await second.request('tools/list')).tools.length, 11);
     assert.deepEqual(await second.request('ping'), {});
     assert.doesNotMatch(second.logs(), /worker-start/);
-    const cacheFile = join(directory, (await readdir(directory)).find(name => name.endsWith('.json')));
+    const cacheFile = join(directory, (await readdir(directory)).find(name => /^[a-f0-9]{64}\.json$/.test(name)));
     const outdated = JSON.parse(await readFile(cacheFile, 'utf8'));
     outdated.value.serverInfo.version = 'stale-backend';
     await writeFile(cacheFile, JSON.stringify(outdated));
@@ -132,12 +160,13 @@ test('two wrapper processes share discovery; legacy ping and warm init/list neve
     const result = await second.request('tools/call', { name: 'obs_commands', arguments: { name: 'GetVersion' } });
     assert.ok(!result.isError); assert.match(second.logs(), /worker-start/);
     assert.equal(JSON.parse(result.content[0].text).command.requestType, 'GetVersion');
-    assert.ok(!(await readdir(directory)).some(name => name.endsWith('.json')), 'Detected identity changes invalidate the shared record');
+    assert.ok(!(await readdir(directory)).some(name => /^[a-f0-9]{64}\.json$/.test(name)), 'Detected identity changes invalidate the shared record');
     await second.request('tools/list');
     // Expiry never removes the shared discovery file.
     assert.ok((await readdir(directory)).some(name => name.endsWith('.json')));
+    assert.equal((await snapshots()).length, 2, 'Backend restart and operations do not append records');
   } finally { await second.close(); }
-  const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('src/cli.js'), 'mcp'], env, stderr: 'pipe' });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('src/cli.js'), 'mcp', ...args], env, stderr: 'pipe' });
   let modernLogs = '';
   transport.stderr.on('data', bytes => { modernLogs += bytes; });
   const modern = new Client({ name: 'modern-fixture', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
@@ -146,5 +175,8 @@ test('two wrapper processes share discovery; legacy ping and warm init/list neve
     assert.equal((await modern.listTools()).tools.length, 11);
     await assert.rejects(modern.ping(), /ping|legacy|removed|supported/i);
     assert.doesNotMatch(modernLogs, /worker-start/);
+    const records = await snapshots();
+    assert.ok(records.length >= 3); // Modern SDK negotiation can create a probe wrapper too.
+    assert.equal(new Set(records.map(record => record.pid)).size, records.length);
   } finally { await modern.close(); await rm(directory, { recursive: true, force: true }); }
 });

@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import { packageInfo } from './package.js';
-import { applyEnvFileOption } from './config.js';
+import { applyEnvFileOption, loadEnvironment } from './config.js';
+
+const startupEnv = { ...process.env };
+const startedAt = new Date().toISOString();
 
 const usage = 'obs-mcp [--env-file PATH | -env_file PATH] [mcp | --tool-manifest | --execute-tool NAME | --version | --help]';
 try {
   const args = applyEnvFileOption(process.argv.slice(2));
   if (!args.length || (args.length === 1 && args[0] === 'mcp')) {
+    const { writeEnvironmentSnapshot } = await import('./discovery-store.js');
+    writeEnvironmentSnapshot(loadEnvironment().OBS_DISCOVERY_CACHE_DIR, startupEnv, startedAt);
     const [{ serveStdio }, { createAdapter }, { createRunner }] = await Promise.all([
       import('@modelcontextprotocol/server/stdio'), import('./adapter.js'), import('./runner.js'),
     ]);
